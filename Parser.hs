@@ -65,17 +65,17 @@ auxparse :: Bool -> Regex -> String -> Maybe (Regex, String)
 auxparse failhard acc [] = Just (acc, [])
 auxparse failhard acc s  = case parseAtom failhard s of
     Nothing -> if failhard then Nothing else Just (acc, s)
-    Just (merger, s') -> auxparse failhard (merger acc) s'
+    Just (re, merger, s') -> auxparse failhard (acc `merger` re) s'
 
-parseAtom :: Bool -> String -> Maybe (Regex -> Regex, String)
+parseAtom :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
 parseAtom failhard s = multiplicity . asum $ ($ s) <$> [alphanum, group, alt failhard]
 
-multiplicity :: Maybe (Regex, Regex -> Regex -> Regex, String) -> Maybe (Regex -> Regex, String)
-multiplicity (Just (re, f, s)) = let f' = flip f in case s of
-    '*':s' -> Just (f' $ Star re, s')
-    '+':s' -> Just (f' . Cat re $ Star re, s')
-    '?':s' -> Just (f' $ Or Eps re, s')
-    s'     -> Just (f' re, s')
+multiplicity :: Maybe (Regex, Regex -> Regex -> Regex, String) -> Maybe (Regex, Regex -> Regex -> Regex, String)
+multiplicity (Just (re, f, s)) = case s of
+    '*':s' -> Just (Star re, f, s')
+    '+':s' -> Just (Cat re (Star re), f, s')
+    '?':s' -> Just (Or Eps re, f, s')
+    s'     -> Just (re, f, s')
 multiplicity Nothing = Nothing
 
 alt :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
