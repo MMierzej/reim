@@ -8,8 +8,8 @@ import Data.Tuple
 data Regex
     = Eps
     | Lit   String (Char -> Bool) -- String only for development purposes
-    | Or    Regex Regex
-    | Cat   Regex Regex
+    | Or    Regex  Regex
+    | Cat   Regex  Regex
     | Star  Regex
     | Group (Maybe String) Regex
 
@@ -30,17 +30,18 @@ instance Show Regex where
     -- show (Star  re)   = "Star (" ++ show re ++ ")"
     -- show (Group Nothing   re) = "Group " ++ show n ++ " <nameless> ("       ++ show re ++ ")"
     -- show (Group (Just lb) re) = "Group " ++ show n ++ " \"" ++ lb ++ "\" (" ++ show re ++ ")"
-    show Eps            = ""
-    show (Lit   s  _)   = s
-    show (Or    re Eps) = show $ Or Eps re
-    show (Or    Eps re) = case re of
+    show Eps           = ""
+    show (Lit  s   _)  = s
+    show (Or   re Eps) = show $ Or Eps re
+    show (Or   Eps re) = case re of
         Group {} ->        show re ++  "?"
         _        -> "(" ++ show re ++ ")?"
-    show (Or    l   r)  = show l ++ "|" ++ show r
-    show (Cat   re  (Star rf)) | re == rf = show re ++ "+"
-    show (Cat   l   r)  = show l ++ show r
-    show (Star  re)     = show re ++ "*"
-    show (Group _   re) = "(" ++ show re ++ ")"
+    show (Or   l   r)  = show l ++ "|" ++ show r
+    show (Cat  re  (Star rf)) | re == rf = show re ++ "+"
+    show (Cat  l   r)  = show l ++ show r
+    show (Star re)     = show re ++ "*"
+    show (Group  Nothing  re) =               "(" ++ show re ++ ")"
+    show (Group (Just lb) re) = "`" ++ lb ++ "`(" ++ show re ++ ")"
 
 
 main = print $ parse "a*|(|b(x|d|p)c)?d+|e*"
@@ -62,29 +63,12 @@ parse s = case auxparse True Eps s of
 -- foldl-analogous
 auxparse :: Bool -> Regex -> String -> Maybe (Regex, String)
 auxparse failhard acc [] = Just (acc, [])
-auxparse failhard acc s  = case subparse failhard s of
+auxparse failhard acc s  = case parseAtom failhard s of
     Nothing -> if failhard then Nothing else Just (acc, s)
     Just (merger, s') -> auxparse failhard (merger acc) s'
 
-subparse :: Bool -> String -> Maybe (Regex -> Regex, String)
-subparse failhard s = multiplicity . asum $ ($ s) <$> [alphanum, group, alt failhard]
-
-alt :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-alt failhard ('|':s) = case auxparse failhard Eps s of 
-    Just (re, s') -> Just (re, Or, s')
-    Nothing -> Nothing
-alt _ _      = Nothing
-
-group :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-group ('(':s) = case auxparse False Eps s of
-    Just (re, ')':s') -> Just (Group Nothing re, Cat, s')
-    _  -> Nothing
-group _ = Nothing
-
-alphanum :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-alphanum (c:s) | isAlphaNum c = Just (Lit [c] (== c), Cat, s)
-               | otherwise    = Nothing
-alphanum _ = Nothing
+parseAtom :: Bool -> String -> Maybe (Regex -> Regex, String)
+parseAtom failhard s = multiplicity . asum $ ($ s) <$> [alphanum, group, alt failhard]
 
 multiplicity :: Maybe (Regex, Regex -> Regex -> Regex, String) -> Maybe (Regex -> Regex, String)
 multiplicity (Just (re, f, s)) = let f' = flip f in case s of
@@ -93,3 +77,20 @@ multiplicity (Just (re, f, s)) = let f' = flip f in case s of
     '?':s' -> Just (f' $ Or Eps re, s')
     s'     -> Just (f' re, s')
 multiplicity Nothing = Nothing
+
+alt :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
+alt failhard ('|':s) = case auxparse failhard Eps s of 
+    Just (re, s') -> Just (re, Or, s')
+    Nothing -> Nothing
+alt _ _      = Nothing
+
+alphanum :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
+alphanum (c:s) | isAlphaNum c = Just (Lit [c] (== c), Cat, s)
+               | otherwise    = Nothing
+alphanum _ = Nothing
+
+group :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
+group ('(':s) = case auxparse False Eps s of
+    Just (re, ')':s') -> Just (Group Nothing re, Cat, s')
+    _  -> Nothing
+group _ = Nothing
