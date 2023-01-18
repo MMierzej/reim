@@ -23,16 +23,27 @@ instance Eq Regex where
     _              == _              = False
 
 instance Show Regex where
-    show Eps          = "Eps"
-    show (Lit   s  _) = "Lit \"" ++ s ++ "\" <pred>"
-    show (Or    l  r) = "Or ("  ++ show l ++ ") (" ++ show r ++ ")"
-    show (Cat   l  r) = "Cat (" ++ show l ++ ") (" ++ show r ++ ")"
-    show (Star  re)   = "Star (" ++ show re ++ ")"
-    show (Group n  Nothing  re) = "Group " ++ show n ++ " <nameless> (" ++ show re ++ ")"
-    show (Group n (Just lb) re) = "Group " ++ show n ++ " \"" ++ lb ++ "\" (" ++ show re ++ ")"
+    -- show Eps          = "Eps"
+    -- show (Lit   s  _) = "Lit \"" ++ s ++ "\" <pred>"
+    -- show (Or    l  r) = "Or ("  ++ show l ++ ") (" ++ show r ++ ")"
+    -- show (Cat   l  r) = "Cat (" ++ show l ++ ") (" ++ show r ++ ")"
+    -- show (Star  re)   = "Star (" ++ show re ++ ")"
+    -- show (Group n  Nothing  re) = "Group " ++ show n ++ " <nameless> (" ++ show re ++ ")"
+    -- show (Group n (Just lb) re) = "Group " ++ show n ++ " \"" ++ lb ++ "\" (" ++ show re ++ ")"
+    show Eps            = ""
+    show (Lit   s   _)  = s
+    show (Or    re Eps) = show $ Or Eps re
+    show (Or    Eps re) = case re of
+        Group _ _ _ -> show re ++ "?"
+        _           -> "(" ++ show re ++ ")?"
+    show (Or    l   r)  = show l ++ "|" ++ show r
+    show (Cat   re  (Star rf)) | re == rf = show re ++ "+"
+    show (Cat   l   r)  = show l ++ show r
+    show (Star  re)     = show re ++ "*"
+    show (Group _ _ re) = "(" ++ show re ++ ")"
 
 
-main = print $ parse "a*(b(x)c)?d+"
+main = print $ parse "a*|(|b(x|d|p)c)?d+|e*"
 
 simpl :: Regex -> Regex
 simpl (Cat   Eps re)  = simpl re
@@ -51,12 +62,18 @@ parse s = case auxparse True Eps s of
 -- fold-analogous
 auxparse :: Bool -> Regex -> String -> Maybe (Regex, String)
 auxparse _        acc [] = Just (acc, [])
-auxparse failhard acc s  = case subparse s of
+auxparse failhard acc s  = case subparse failhard s of
     Nothing -> if failhard then Nothing else Just (acc, s)
     Just (merger, s') -> auxparse failhard (merger acc) s'
 
-subparse :: String -> Maybe (Regex -> Regex, String)
-subparse s = multiplicity . asum $ ($ s) <$> [alphanum, group]
+subparse :: Bool -> String -> Maybe (Regex -> Regex, String)
+subparse failhard s = multiplicity . asum $ ($ s) <$> [alphanum, group, alt failhard]
+
+alt :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
+alt failhard ('|':s) = case auxparse failhard Eps s of 
+    Just (re, s') -> Just (re, Or, s')
+    Nothing -> Nothing
+alt _ _      = Nothing
 
 group :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
 group ('(':s) = case auxparse False Eps s of
