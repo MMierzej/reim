@@ -1,5 +1,6 @@
 import Control.Applicative
 import Data.Char
+import Data.Foldable
 import Data.Maybe
 import Data.Tuple
 
@@ -30,6 +31,7 @@ instance Show Regex where
     show (Group n  Nothing  re) = "Group " ++ show n ++ " <nameless> (" ++ show re ++ ")"
     show (Group n (Just lb) re) = "Group " ++ show n ++ " \"" ++ lb ++ "\" (" ++ show re ++ ")"
 
+
 main = print $ parse "a*(b(x)c)?d+"
 
 simpl :: Regex -> Regex
@@ -50,26 +52,27 @@ parse s = case auxparse True Eps s of
 auxparse :: Bool -> Regex -> String -> Maybe (Regex, String)
 auxparse _        acc [] = Just (acc, [])
 auxparse failhard acc s  = case subparse s of
-    Nothing       -> if failhard then Nothing else Just (acc, s)
-    Just (re, s') -> auxparse failhard (Cat acc re) s'
+    Nothing -> if failhard then Nothing else Just (acc, s)
+    Just (merger, s') -> auxparse failhard (merger acc) s'
 
-subparse :: String -> Maybe (Regex, String)
-subparse [] = Just (Eps, [])
-subparse s  = multiplicity . foldr (<|>) Nothing $ ($ s) <$> [alphanum, group]
+subparse :: String -> Maybe (Regex -> Regex, String)
+subparse s = multiplicity . asum $ ($ s) <$> [alphanum, group]
 
-group :: String -> Maybe (Regex, String)
+group :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
 group ('(':s) = case auxparse False Eps s of
-    Just (re, ')':s') -> Just (Group 0 Nothing re, s')
-    _                 -> Nothing
+    Just (re, ')':s') -> Just (Group 0 Nothing re, Cat, s')
+    _  -> Nothing
 group _ = Nothing
 
-alphanum :: String -> Maybe (Regex, String)
-alphanum (c:s) | isAlphaNum c = Just (Lit [c] (== c), s)
+alphanum :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
+alphanum (c:s) | isAlphaNum c = Just (Lit [c] (== c), Cat, s)
                | otherwise    = Nothing
 alphanum _ = Nothing
 
-multiplicity :: Maybe (Regex, String) -> Maybe (Regex, String)
-multiplicity (Just (re, '*':s)) = Just (Star re, s)
-multiplicity (Just (re, '+':s)) = Just (Cat re $ Star re, s)
-multiplicity (Just (re, '?':s)) = Just (Or Eps re, s)
-multiplicity x = x
+multiplicity :: Maybe (Regex, Regex -> Regex -> Regex, String) -> Maybe (Regex -> Regex, String)
+multiplicity (Just (re, f, s)) = let f' = flip f in case s of
+    '*':s' -> Just (f' $ Star re, s')
+    '+':s' -> Just (f' . Cat re $ Star re, s')
+    '?':s' -> Just (f' $ Or Eps re, s')
+    s'     -> Just (f' re, s')
+multiplicity Nothing = Nothing
