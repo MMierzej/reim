@@ -30,12 +30,21 @@ instance Show Regex where
     show (Group n  Nothing  re) = "Group " ++ show n ++ " <nameless> (" ++ show re ++ ")"
     show (Group n (Just lb) re) = "Group " ++ show n ++ " \"" ++ lb ++ "\" (" ++ show re ++ ")"
 
-main = putStrLn . show $ parse "a*(bc)?d+"
+main = print $ parse "a*(b(x)c)?d+"
+
+simpl :: Regex -> Regex
+simpl (Cat   Eps re)  = simpl re
+simpl (Cat   re  Eps) = simpl re
+simpl (Cat   re  rf)  = Cat (simpl re) (simpl rf)
+simpl (Or    re  rf)  = Or  (simpl re) (simpl rf)
+simpl (Star  re)      = Star $ simpl re
+simpl (Group n lb re) = Group n lb $ simpl re
+simpl re = re
 
 parse :: String -> Maybe Regex
 parse s = case auxparse True Eps s of
     Nothing      -> Nothing
-    Just (re, _) -> Just re
+    Just (re, _) -> Just $ simpl re
 
 -- fold-analogous
 auxparse :: Bool -> Regex -> String -> Maybe (Regex, String)
