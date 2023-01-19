@@ -23,34 +23,34 @@ instance Eq Regex where
     _           == _           = False
 
 instance Show Regex where
-    show Eps          = "Eps"
-    show (Lit   s  _) = "Lit \"" ++ s ++ "\" <pred>"
-    show (Or    l  r) = "Or ("  ++ show l ++ ") (" ++ show r ++ ")"
-    show (Cat   l  r) = "Cat (" ++ show l ++ ") (" ++ show r ++ ")"
-    show (Star  re)   = "Star (" ++ show re ++ ")"
-    show (Group Nothing   re) = "Group " ++ " <nameless> ("       ++ show re ++ ")"
-    show (Group (Just lb) re) = "Group " ++ " \"" ++ lb ++ "\" (" ++ show re ++ ")"
+    -- show Eps          = "Eps"
+    -- show (Lit   s  _) = "Lit \"" ++ s ++ "\" <pred>"
+    -- show (Or    l  r) = "Or ("  ++ show l ++ ") (" ++ show r ++ ")"
+    -- show (Cat   l  r) = "Cat (" ++ show l ++ ") (" ++ show r ++ ")"
+    -- show (Star  re)   = "Star (" ++ show re ++ ")"
+    -- show (Group Nothing   re) = "Group " ++ " <nameless> ("       ++ show re ++ ")"
+    -- show (Group (Just lb) re) = "Group " ++ " \"" ++ lb ++ "\" (" ++ show re ++ ")"
     --
-    -- show Eps           = ""
-    -- show (Lit  s   _)  = s
-    -- show (Or   re Eps) = show $ Or Eps re
-    -- show (Or   Eps re) = case re of
-    --     Group {} ->        show re ++  "?"
-    --     _        -> "(" ++ show re ++ ")?"
-    -- show (Or   l   r)  = show l ++ "|" ++ show r
-    -- show (Cat  re  (Star rf)) | re == rf = show re ++ "+"
-    -- show (Cat  l   r)  = show l ++ show r
-    -- show (Star re)     = show re ++ "*"
-    -- show (Group  Nothing  re) =               "(" ++ show re ++ ")"
-    -- show (Group (Just lb) re) = "`" ++ lb ++ "`(" ++ show re ++ ")"
+    show Eps           = ""
+    show (Lit  s   _)  = s
+    show (Or   re Eps) = show $ Or Eps re
+    show (Or   Eps re) = case re of
+        Group {} ->        show re ++  "?"
+        _        -> "(" ++ show re ++ ")?"
+    show (Or   l   r)  = show l ++ "|" ++ show r
+    show (Cat  re  (Star rf)) | re == rf = show re ++ "+"
+    show (Cat  l   r)  = show l ++ show r
+    show (Star re)     = show re ++ "*"
+    show (Group  Nothing  re) =               "(" ++ show re ++ ")"
+    show (Group (Just lb) re) = "`" ++ lb ++ "`(" ++ show re ++ ")"
 
 
 -- main = print $ parse "abcdefghi"
 -- main = print $ parse "a|b"
 -- main = print $ parse "x|"
-main = print $ parse "|d"
+-- main = print $ parse "|d"
 -- main = print $ parse "x|d"
--- main = print $ parse "a*|(|b(x|d|p)c)?d+()|e*"
+main = print $ parse "a*|(|b(x|d|p)c)?d+()|e*"
 -- main = print $ parse "a*(b(x)c)?d+()"
 
 simpl :: Regex -> Regex
@@ -64,7 +64,7 @@ simpl re              = re
 
 parse :: String -> Maybe Regex
 parse s = case auxparse True s of
-    Just (re, _, _) -> Just re
+    Just (re, glue, _) -> Just . simpl $ Eps `glue` re
     Nothing      -> Nothing
 
 auxparse :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
@@ -86,7 +86,7 @@ multiplicity Nothing = Nothing
 
 alt :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
 alt failhard ('|':s) = case auxparse failhard s of 
-    Just (re, _, s') -> Just (re, Or, s')
+    Just (re, glue, s') -> Just (Eps `glue` re, Or, s')
     Nothing -> Nothing
 alt _ _      = Nothing
 
@@ -97,6 +97,6 @@ alphanum _ = Nothing
 
 group :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
 group ('(':s) = case auxparse False s of
-    Just (re, _, ')':s') -> Just (Group Nothing re, Cat, s')
+    Just (re, glue, ')':s') -> Just (Eps `glue` Group Nothing re, Cat, s')
     _  -> Nothing
 group _ = Nothing
