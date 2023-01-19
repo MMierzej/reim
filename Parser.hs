@@ -23,28 +23,35 @@ instance Eq Regex where
     _           == _           = False
 
 instance Show Regex where
-    -- show Eps          = "Eps"
-    -- show (Lit   s  _) = "Lit \"" ++ s ++ "\" <pred>"
-    -- show (Or    l  r) = "Or ("  ++ show l ++ ") (" ++ show r ++ ")"
-    -- show (Cat   l  r) = "Cat (" ++ show l ++ ") (" ++ show r ++ ")"
-    -- show (Star  re)   = "Star (" ++ show re ++ ")"
-    -- show (Group Nothing   re) = "Group " ++ show n ++ " <nameless> ("       ++ show re ++ ")"
-    -- show (Group (Just lb) re) = "Group " ++ show n ++ " \"" ++ lb ++ "\" (" ++ show re ++ ")"
-    show Eps           = ""
-    show (Lit  s   _)  = s
-    show (Or   re Eps) = show $ Or Eps re
-    show (Or   Eps re) = case re of
-        Group {} ->        show re ++  "?"
-        _        -> "(" ++ show re ++ ")?"
-    show (Or   l   r)  = show l ++ "|" ++ show r
-    show (Cat  re  (Star rf)) | re == rf = show re ++ "+"
-    show (Cat  l   r)  = show l ++ show r
-    show (Star re)     = show re ++ "*"
-    show (Group  Nothing  re) =               "(" ++ show re ++ ")"
-    show (Group (Just lb) re) = "`" ++ lb ++ "`(" ++ show re ++ ")"
+    show Eps          = "Eps"
+    show (Lit   s  _) = "Lit \"" ++ s ++ "\" <pred>"
+    show (Or    l  r) = "Or ("  ++ show l ++ ") (" ++ show r ++ ")"
+    show (Cat   l  r) = "Cat (" ++ show l ++ ") (" ++ show r ++ ")"
+    show (Star  re)   = "Star (" ++ show re ++ ")"
+    show (Group Nothing   re) = "Group " ++ " <nameless> ("       ++ show re ++ ")"
+    show (Group (Just lb) re) = "Group " ++ " \"" ++ lb ++ "\" (" ++ show re ++ ")"
+    --
+    -- show Eps           = ""
+    -- show (Lit  s   _)  = s
+    -- show (Or   re Eps) = show $ Or Eps re
+    -- show (Or   Eps re) = case re of
+    --     Group {} ->        show re ++  "?"
+    --     _        -> "(" ++ show re ++ ")?"
+    -- show (Or   l   r)  = show l ++ "|" ++ show r
+    -- show (Cat  re  (Star rf)) | re == rf = show re ++ "+"
+    -- show (Cat  l   r)  = show l ++ show r
+    -- show (Star re)     = show re ++ "*"
+    -- show (Group  Nothing  re) =               "(" ++ show re ++ ")"
+    -- show (Group (Just lb) re) = "`" ++ lb ++ "`(" ++ show re ++ ")"
 
 
-main = print $ parse "a*|(|b(x|d|p)c)?d+|e*"
+-- main = print $ parse "abcdefghi"
+-- main = print $ parse "a|b"
+-- main = print $ parse "x|"
+main = print $ parse "|d"
+-- main = print $ parse "x|d"
+-- main = print $ parse "a*|(|b(x|d|p)c)?d+()|e*"
+-- main = print $ parse "a*(b(x)c)?d+()"
 
 simpl :: Regex -> Regex
 simpl (Or    re  rf)  = Or   (simpl re) (simpl rf)
@@ -56,16 +63,15 @@ simpl (Group lb  re)  = Group lb (simpl re)
 simpl re              = re
 
 parse :: String -> Maybe Regex
-parse s = case auxparse True Eps s of
+parse s = case auxparse True s of
+    Just (re, _, _) -> Just re
     Nothing      -> Nothing
-    Just (re, _) -> Just $ simpl re
 
--- foldl-analogous
-auxparse :: Bool -> Regex -> String -> Maybe (Regex, String)
-auxparse failhard acc [] = Just (acc, [])
-auxparse failhard acc s  = case parseAtom failhard s of
-    Nothing -> if failhard then Nothing else Just (acc, s)
-    Just (re, merger, s') -> auxparse failhard (acc `merger` re) s'
+auxparse :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
+auxparse failhard [] = Just (Eps, Cat, [])
+auxparse failhard s  = case parseAtom failhard s of
+    Just (re, glue, s') -> (\(re', glue', s'') -> (re `glue'` re', glue, s'')) <$> auxparse failhard s'
+    Nothing -> if failhard then Nothing else Just (Eps, Cat, s)
 
 parseAtom :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
 parseAtom failhard s = multiplicity . asum $ ($ s) <$> [alphanum, group, alt failhard]
@@ -79,8 +85,8 @@ multiplicity (Just (re, f, s)) = case s of
 multiplicity Nothing = Nothing
 
 alt :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-alt failhard ('|':s) = case auxparse failhard Eps s of 
-    Just (re, s') -> Just (re, Or, s')
+alt failhard ('|':s) = case auxparse failhard s of 
+    Just (re, _, s') -> Just (re, Or, s')
     Nothing -> Nothing
 alt _ _      = Nothing
 
@@ -90,7 +96,7 @@ alphanum (c:s) | isAlphaNum c = Just (Lit [c] (== c), Cat, s)
 alphanum _ = Nothing
 
 group :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-group ('(':s) = case auxparse False Eps s of
-    Just (re, ')':s') -> Just (Group Nothing re, Cat, s')
+group ('(':s) = case auxparse False s of
+    Just (re, _, ')':s') -> Just (Group Nothing re, Cat, s')
     _  -> Nothing
 group _ = Nothing
