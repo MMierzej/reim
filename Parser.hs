@@ -77,15 +77,15 @@ auxparse failhard s  = case parseAtom failhard s of
     Nothing -> if failhard then Nothing else Just (Eps, Cat, s)
 
 parseAtom :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-parseAtom failhard s = multiplicity . asum $ ($ s) <$> [alphanum, group, special, disjunction failhard]
+parseAtom failhard s = quantity . asum $ ($ s) <$> [alphanum, group, special, disjunction failhard]
 
-multiplicity :: Maybe (Regex, Regex -> Regex -> Regex, String) -> Maybe (Regex, Regex -> Regex -> Regex, String)
-multiplicity (Just (re, f, s)) = case s of
+quantity :: Maybe (Regex, Regex -> Regex -> Regex, String) -> Maybe (Regex, Regex -> Regex -> Regex, String)
+quantity (Just (re, f, s)) = case s of
     '*':s' -> Just (Star re, f, s')
     '+':s' -> Just (Cat re (Star re), f, s')
     '?':s' -> Just (Or Eps re, f, s')
     s'     -> Just (re, f, s')
-multiplicity Nothing = Nothing
+quantity Nothing = Nothing
 
 disjunction :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
 disjunction failhard ('|':s) = case auxparse failhard s of 
