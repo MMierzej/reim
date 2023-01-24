@@ -53,7 +53,7 @@ instance Show Regex where
 -- main = print $ parse "x|"
 -- main = print $ parse "|d"
 -- main = print $ parse "x|d"
-main = print $ parse "a*|(|b(x|d|p)c)?d+()|e*"
+main = print $ parse "a*|(|b(x|d|p\\w)c\\d)?d+()|e*"
 -- main = print $ parse "a*(b(x)c)?d+()"
 
 simpl :: Regex -> Regex
@@ -77,7 +77,7 @@ auxparse failhard s  = case parseAtom failhard s of
     Nothing -> if failhard then Nothing else Just (Eps, Cat, s)
 
 parseAtom :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-parseAtom failhard s = multiplicity . asum $ ($ s) <$> [alphanum, group, alt failhard]
+parseAtom failhard s = multiplicity . asum $ ($ s) <$> [alphanum, group, special, alt failhard]
 
 multiplicity :: Maybe (Regex, Regex -> Regex -> Regex, String) -> Maybe (Regex, Regex -> Regex -> Regex, String)
 multiplicity (Just (re, f, s)) = case s of
@@ -92,6 +92,25 @@ alt failhard ('|':s) = case auxparse failhard s of
     Just (re, glue, s') -> Just (Eps `glue` re, Or, s')
     Nothing -> Nothing
 alt _ _      = Nothing
+
+special :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
+special ('\\':c:s) = case maybePred of
+    Just pred  -> Just (Lit ('\\':[c]) (neg . pred), Cat, s)
+    Nothing    -> Nothing
+    where
+        -- could be prettier
+        maybePred = case toLower c of
+            '\\' -> Just (== c)
+            '*'  -> Just (== c)
+            '?'  -> Just (== c)
+            -- ...
+            'w'  -> Just isLetter
+            'd'  -> Just isDigit
+            's'  -> Just isSpace
+            _    -> Nothing
+        neg | isUpper c = not
+            | otherwise = id
+special _ = Nothing
 
 alphanum :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
 alphanum (c:s) | isAlphaNum c = Just (Lit [c] (== c), Cat, s)
