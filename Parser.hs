@@ -23,26 +23,29 @@ instance Eq Regex where
     _           == _           = False
 
 instance Show Regex where
-    -- show Eps          = "Eps"
-    -- show (Lit   s  _) = "Lit \"" ++ s ++ "\" <pred>"
-    -- show (Or    l  r) = "Or ("  ++ show l ++ ") (" ++ show r ++ ")"
-    -- show (Cat   l  r) = "Cat (" ++ show l ++ ") (" ++ show r ++ ")"
-    -- show (Star  re)   = "Star (" ++ show re ++ ")"
-    -- show (Group Nothing   re) = "Group " ++ " <nameless> ("       ++ show re ++ ")"
-    -- show (Group (Just lb) re) = "Group " ++ " \"" ++ lb ++ "\" (" ++ show re ++ ")"
-    --
-    show Eps           = ""
-    show (Lit  s   _)  = s
-    show (Or   re Eps) = show $ Or Eps re
-    show (Or   Eps re) = case re of
-        Group {} ->        show re ++  "?"
-        _        -> "(" ++ show re ++ ")?"
-    show (Or   l   r)  = show l ++ "|" ++ show r
-    show (Cat  re  (Star rf)) | re == rf = show re ++ "+"
-    show (Cat  l   r)  = show l ++ show r
-    show (Star re)     = show re ++ "*"
-    show (Group  Nothing  re) =               "(" ++ show re ++ ")"
-    show (Group (Just lb) re) = "`" ++ lb ++ "`(" ++ show re ++ ")"
+    -- show = showStruct
+    show = stringify
+        where
+            showStruct Eps          = "Eps"
+            showStruct (Lit   s  _) = "Lit \"" ++ s ++ "\" <pred>"
+            showStruct (Or    l  r) = "Or ("  ++ show l ++ ") (" ++ show r ++ ")"
+            showStruct (Cat   l  r) = "Cat (" ++ show l ++ ") (" ++ show r ++ ")"
+            showStruct (Star  re)   = "Star (" ++ show re ++ ")"
+            showStruct (Group Nothing   re) = "Group " ++ " <nameless> ("       ++ show re ++ ")"
+            showStruct (Group (Just lb) re) = "Group " ++ " \"" ++ lb ++ "\" (" ++ show re ++ ")"
+
+            stringify Eps           = ""
+            stringify (Lit  s   _)  = s
+            stringify (Or   re Eps) = show $ Or Eps re
+            stringify (Or   Eps re) = case re of
+                Group {} ->        show re ++  "?"
+                _        -> "(" ++ show re ++ ")?"
+            stringify (Or   l   r)  = show l ++ "|" ++ show r
+            stringify (Cat  re  (Star rf)) | re == rf = show re ++ "+"
+            stringify (Cat  l   r)  = show l ++ show r
+            stringify (Star re)     = show re ++ "*"
+            stringify (Group  Nothing  re) =               "(" ++ show re ++ ")"
+            stringify (Group (Just lb) re) = "`" ++ lb ++ "`(" ++ show re ++ ")"
 
 
 -- main = print $ parse "abcdefghi"
