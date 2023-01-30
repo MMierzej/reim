@@ -11,7 +11,7 @@ data Regex
     | Or    Regex  Regex
     | Cat   Regex  Regex
     | Star  Regex
-    | Group (Maybe String) Regex
+    | Group String Regex
 
 instance Eq Regex where
     Eps         == Eps         = True
@@ -26,13 +26,12 @@ instance Show Regex where
     -- show = showStruct
     show = stringify
         where
-            showStruct Eps          = "Eps"
-            showStruct (Lit   s  _) = "Lit \"" ++ s ++ "\" <pred>"
-            showStruct (Or    l  r) = "Or ("  ++ show l ++ ") (" ++ show r ++ ")"
-            showStruct (Cat   l  r) = "Cat (" ++ show l ++ ") (" ++ show r ++ ")"
-            showStruct (Star  re)   = "Star (" ++ show re ++ ")"
-            showStruct (Group Nothing   re) = "Group " ++ " <nameless> ("       ++ show re ++ ")"
-            showStruct (Group (Just lb) re) = "Group " ++ " \"" ++ lb ++ "\" (" ++ show re ++ ")"
+            showStruct Eps           = "Eps"
+            showStruct (Lit   s  _)  = "Lit \"" ++ s ++ "\" <pred>"
+            showStruct (Or    l  r)  = "Or ("  ++ show l ++ ") (" ++ show r ++ ")"
+            showStruct (Cat   l  r)  = "Cat (" ++ show l ++ ") (" ++ show r ++ ")"
+            showStruct (Star  re)    = "Star (" ++ show re ++ ")"
+            showStruct (Group lb re) = "Group \"" ++ lb ++ "\" (" ++ show re ++ ")"
 
             stringify Eps           = ""
             stringify (Lit  s   _)  = s
@@ -44,8 +43,8 @@ instance Show Regex where
             stringify (Cat  re  (Star rf)) | re == rf = show re ++ "+"
             stringify (Cat  l   r)  = show l ++ show r
             stringify (Star re)     = show re ++ "*"
-            stringify (Group  Nothing  re) =               "(" ++ show re ++ ")"
-            stringify (Group (Just lb) re) = "`" ++ lb ++ "`(" ++ show re ++ ")"
+            stringify (Group [] re) = "("               ++ show re ++ ")"
+            stringify (Group lb re) = "(<" ++ lb ++ ">" ++ show re ++ ")"
 
 
 -- main = print $ parse "abcdefghi"
@@ -53,7 +52,8 @@ instance Show Regex where
 -- main = print $ parse "x|"
 -- main = print $ parse "|d"
 -- main = print $ parse "x|d"
-main = print $ parse "a*|(|b(x|d|p\\w)c\\d)?d+()|e*"
+-- main = print $ parse "a*|(|b(x|d|p\\w)c\\d)?d+()|e*"
+main = print $ parse "a*|(<NAMEK>|b(x|d|p\\w)c\\d)?d+()|e*"
 -- main = print $ parse "a*(b(x)c)?d+()"
 
 simpl :: Regex -> Regex
@@ -68,7 +68,7 @@ simpl re              = re
 parse :: String -> Maybe Regex
 parse s = case auxparse True s of
     Just (re, glue, _) -> Just . simpl $ Eps `glue` re
-    Nothing      -> Nothing
+    Nothing -> Nothing
 
 auxparse :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
 auxparse failhard [] = Just (Eps, Cat, [])
@@ -90,13 +90,13 @@ quantity Nothing = Nothing
 disjunction :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
 disjunction failhard ('|':s) = case auxparse failhard s of 
     Just (re, glue, s') -> Just (Eps `glue` re, Or, s')
-    Nothing -> Nothing
-disjunction _ _      = Nothing
+    Nothing    -> Nothing
+disjunction _ _ = Nothing
 
 special :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
 special ('\\':c:s) = case maybePred of
-    Just pred  -> Just (Lit ('\\':[c]) (neg . pred), Cat, s)
-    Nothing    -> Nothing
+    Just pred -> Just (Lit ('\\':[c]) (neg . pred), Cat, s)
+    Nothing   -> Nothing
     where
         -- could be prettier
         maybePred = case toLower c of
@@ -118,7 +118,20 @@ alphanum (c:s) | isAlphaNum c = Just (Lit [c] (== c), Cat, s)
 alphanum _ = Nothing
 
 group :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-group ('(':s) = case auxparse False s of
-    Just (re, glue, ')':s') -> Just (Eps `glue` Group Nothing re, Cat, s')
-    _  -> Nothing
+group ('(':s) = case auxparse False s' of
+    Just (re, glue, ')':s'') -> Just (Eps `glue` Group name re, Cat, s'')
+    _ -> Nothing
+    where
+        (name, s') = case parseName s of
+            Just (name', s'') -> (name', s'')
+            Nothing           -> ("",    s)
+
+        parseName ('<':s) = auxParseName s
+        parseName _       = Nothing
+
+        auxParseName ('>':s) = Just ("", s)
+        auxParseName (c:s)   = case auxParseName s of
+            Just (name, s') -> Just (c:name, s')
+            Nothing         -> Nothing
+        auxParseName []      = Nothing
 group _ = Nothing
