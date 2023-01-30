@@ -1,6 +1,7 @@
 import Control.Applicative
 import Data.Char
 import Data.Foldable
+import Data.Functor
 import Data.Maybe
 import Data.Tuple
 
@@ -77,7 +78,7 @@ auxparse failhard s  = case parseAtom failhard s of
     Nothing -> if failhard then Nothing else Just (Eps, Cat, s)
 
 parseAtom :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-parseAtom failhard s = quantity . asum $ ($ s) <$> [alphanum, group, special, disjunction failhard]
+parseAtom failhard = quantity . asum . ([alphanum, group, special, disjunction failhard] <&>) . flip ($)
 
 quantity :: Maybe (Regex, Regex -> Regex -> Regex, String) -> Maybe (Regex, Regex -> Regex -> Regex, String)
 quantity (Just (re, f, s)) = case s of
