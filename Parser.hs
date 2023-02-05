@@ -81,7 +81,7 @@ auxparse failhard s  = case parseAtom failhard s of
     Nothing -> if failhard then Nothing else Just (Eps, Cat, s)
 
 parseAtom :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-parseAtom failhard = quantity . asum . ([alphanum, group, escaped, disjunction failhard] <&>) . flip ($)
+parseAtom failhard = quantity . asum . ([group, plainOrEscd, disjunction failhard] <&>) . flip ($)
 
 quantity :: Maybe (Regex, Regex -> Regex -> Regex, String) -> Maybe (Regex, Regex -> Regex -> Regex, String)
 quantity (Just (re, f, s)) = case s of
@@ -99,7 +99,7 @@ disjunction _ _ = Nothing
 
 predFromChar :: Bool -> Char -> Maybe (Char -> Bool)
 predFromChar escaped c = do
-        c2p  <- Map.lookup escaped table
+        c2p <- Map.lookup escaped table
         Map.lookup c c2p <|> (if not escaped then Just (== c) else Nothing)
     where
         table = Map.fromList . zip [True, False] $ [yescd, nescd] <&> Map.fromList
@@ -117,29 +117,14 @@ predFromChar escaped c = do
             ]
         nescd = [('.', const True)]
 
-escaped :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-escaped ('\\':c:s) = case maybePred of
-    Just pred -> Just (Lit ('\\':[c]) (neg . pred), Cat, s)
+plainOrEscd :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
+plainOrEscd ('\\':c:s) = case predFromChar True c of
+    Just pred -> Just (Lit ('\\':[c]) pred, Cat, s)
     Nothing   -> Nothing
-    where
-        -- could be prettier
-        maybePred = case toLower c of
-            '\\' -> Just (== c)
-            '*'  -> Just (== c)
-            '?'  -> Just (== c)
-            -- ...
-            'w'  -> Just isLetter
-            'd'  -> Just isDigit
-            's'  -> Just isSpace
-            _    -> Nothing
-        neg | isUpper c = not
-            | otherwise = id
-escaped _ = Nothing
-
-alphanum :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-alphanum (c:s) | isAlphaNum c = Just (Lit [c] (== c), Cat, s)
-               | otherwise    = Nothing
-alphanum _ = Nothing
+plainOrEscd (c:s) = case predFromChar False c of
+    Just pred -> Just (Lit [c] pred, Cat, s)
+    Nothing   -> Nothing
+plainOrEscd _  = Nothing
 
 group :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
 group ('(':s) = case auxparse False s' of
