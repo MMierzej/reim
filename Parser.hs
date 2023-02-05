@@ -28,8 +28,8 @@ instance Eq Regex where
     _           == _           = False
 
 instance Show Regex where
-    show = showStruct
-    -- show = stringify
+    -- show = showStruct
+    show = stringify
         where
             showStruct Eps           = "Eps"
             showStruct (Lit   s  _)  = "Lit \"" ++ s ++ "\" <pred>"
@@ -74,15 +74,27 @@ grpEnvEmpty :: GroupEnv
 grpEnvEmpty = Map.empty
 
 
+data Ctx = Root | L Ctx
+
+restore :: Regex -> Ctx -> Regex -> Regex
+restore _ Root re = re
+restore (Or  l r) (L path) re = Or  (restore l path re) r
+restore (Cat l r) (L path) re = Cat (restore l path re) r
+restore _ _ _ = Eps -- shouldn't take place
+
+
 -- main = print $ parse "abcdefghi"
 -- main = print $ parse "a|b"
 -- main = print $ parse "x|"
 -- main = print $ parse "|d"
 -- main = print $ parse "x|d"
 -- main = print $ parse "a*|(|b(x|d|p\\w)c\\d)?d+()|e*"
-main = print $ parse "a*|\\((<NAMEK>|b(x|d|p\\w)c\\d)?d+()|e*"
+main = print $ parse "a*|\\((<NAMEK>|b(<G>x|d|p\\w)c\\d)?d+(<NAMEK>)(<G>)?|e*"
 -- main = print $ parse "a*(b(x)c)?d+()"
+-- main = print $ parse "aa|bbb|cc|dd"
 
+
+type IntermResult = (Regex, String, GroupEnv, Regex, Ctx)
 
 specials :: [Char]
 specials =  ['(', ')', '[', ']', '{', '}', '|', '*', '+', '?', '\\', '.']
@@ -92,40 +104,58 @@ setOfSpecials =  Set.fromList specials
 
 parse :: String -> Maybe Regex
 parse s = case auxParse True grpEnvEmpty s of
-    Just (re, glue, _, _) -> Just . simpl $ Eps `glue` re
-    Nothing -> Nothing
+    Just (re, _, _, root, ctx) -> return . simpl $ restore root ctx re
+    Nothing -> empty
 
-auxParse :: Bool -> GroupEnv -> String -> Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv)
-auxParse failhard env "" = Just (Eps, Cat, [], env)
+auxParse :: Bool -> GroupEnv -> String -> Maybe IntermResult
+auxParse failhard env "" = Just (Eps, "", env, Eps, Root)
 auxParse failhard env s  = case parseAtom failhard env s of
-    Just (re, glue, s', env') -> do
-        (re', glue', s'', env'') <- auxParse failhard env' s'
-        return (re `glue'` re', glue, s'', env'')
-    Nothing -> if failhard then Nothing else Just (Eps, Cat, s, env)
+    Just (re, s', env', _, Root) -> do
+        (re', s'', env'', root', ctx') <- auxParse failhard env' s'
+        return (Cat re re', s'', env'', root', ctx')
+    Just (re, s', env', root, ctx@(L _)) -> do
+        (re', s'', env'', root', ctx') <- auxParse failhard env' s'
+        let re''   = restore root' ctx' re'
+        let root'' = Cat root re''
+        return (re, s'', env'', root'', L ctx)
+    Nothing -> if failhard then empty else return (Eps, s, env, Eps, Root)
 
-parseAtom :: Bool -> GroupEnv -> String -> Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv)
-parseAtom failhard env = quantity . asum . ([group, plainOrEscd, disjunction failhard] <&> ($ env) <&>) . flip ($)
+parseAtom :: Bool -> GroupEnv -> String -> Maybe IntermResult
+parseAtom failhard env = quantity . asum . ([plainOrEscd, group, disjunction failhard] <&> ($ env) <&>) . flip ($)
 
-quantity :: Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv) -> Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv)
-quantity (Just (re, glue, s, env)) = case s of
-    '*':s' -> Just (Star re,           glue, s', env)
-    '+':s' -> Just (Cat  re (Star re), glue, s', env)
-    '?':s' -> Just (Or   Eps re,       glue, s', env)
-    s'     -> Just (re,                glue, s', env)
-quantity Nothing = Nothing
+quantity :: Maybe IntermResult -> Maybe IntermResult
+quantity (Just (re, s, env, root, ctx)) = return (re', s', env, root, ctx)
+    where
+        (re', s') = case s of
+            '*':s' -> (Star re,           s')
+            '+':s' -> (Cat  re (Star re), s')
+            '?':s' -> (Or   Eps re,       s')
+            _      -> (re,                s)
+quantity Nothing = empty
 
-disjunction :: Bool -> GroupEnv -> String -> Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv)
-disjunction failhard env ('|':s) = case auxParse failhard env s of 
-    Just (re, glue, s', env') -> Just (Eps `glue` re, Or, s', env')
-    Nothing    -> Nothing
-disjunction _ _ _ = Nothing
+disjunction :: Bool -> GroupEnv -> String -> Maybe IntermResult
+disjunction failhard env ('|':s) = do
+    (re, s', env', root, ctx) <- auxParse failhard env s
+    return (Eps, s', env', Or Eps (restore root ctx re), L Root)
+disjunction _ _ _ = empty
+
+plainOrEscd :: GroupEnv -> String -> Maybe IntermResult
+plainOrEscd env ('\\':c:s) = do
+    pred <- predFromChar True c
+    let re = Lit ('\\':[c]) pred
+    return (re, s, env, re, Root)
+plainOrEscd env (c:s) = do
+    pred <- predFromChar False c
+    let re = Lit [c] pred
+    return (re, s, env, re, Root)
+plainOrEscd _ _ = empty
 
 predFromChar :: Bool -> Char -> Maybe (Char -> Bool)
 predFromChar escaped c = do
         c2p <- Map.lookup escaped table
         Map.lookup c c2p <|> if not escaped && Set.notMember c setOfSpecials
-                                then Just (== c)
-                             else Nothing
+                                then return (== c)
+                             else empty
     where
         table = Map.fromList . zip [True, False] $ [yesc'd, nesc'd] <&> Map.fromList
         yesc'd = ([('w', isLetter),
@@ -135,40 +165,33 @@ predFromChar escaped c = do
                 ++ [(c, (== c)) | c <- specials]
         nesc'd = [('.', const True)]
 
-plainOrEscd :: GroupEnv -> String -> Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv)
-plainOrEscd env ('\\':c:s) = case predFromChar True c of
-    Just pred  -> Just (Lit ('\\':[c]) pred, Cat, s, env)
-    Nothing    -> Nothing
-plainOrEscd env (c:s) = case predFromChar False c of
-    Just pred  -> Just (Lit [c] pred, Cat, s, env)
-    Nothing    -> Nothing
-plainOrEscd _ _ = Nothing
-
-group :: GroupEnv -> String -> Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv)
+group :: GroupEnv -> String -> Maybe IntermResult
 group env ('(':s) = case name of
     "" -> case auxParse False env s' of
-        Just (re, glue, ')':s'', env') -> Just (Eps `glue` Group "" re, Cat, s'', env')
-        _ -> Nothing
+        Just (re, ')':s'', env', root, ctx) -> let gr = Group "" (restore root ctx re) in
+            return (gr, s'', env', gr, Root)
+        _ -> empty
     _  -> case s' of
         (')':s'') -> do
             gr <- grpEnvGet env name
-            Just (gr, Cat, s'', env)
+            return (gr, s'', env, gr, Root)
         _ -> case auxParse False env s' of
-            Just (re, glue, ')':s'', env') -> case grpEnvGet env' name of
-                Nothing -> let gr = Group name re in Just (Eps `glue` gr, Cat, s'', fromJust $ grpEnvAdd env' name gr)
-                Just _  -> Nothing
-            _ -> Nothing
+            Just (re, ')':s'', env', root, ctx) -> case grpEnvGet env' name of
+                Nothing -> let gr = Group name (restore root ctx re) in
+                    return (gr, s'', fromJust $ grpEnvAdd env' name gr, gr, Root)
+                Just _  -> empty
+            _ -> empty
     where
         (name, s') = case parseName s of
             Just (name', s'') -> (name', s'')
             Nothing           -> ("",    s)
 
         parseName ('<':s)     = auxParseName s
-        parseName _           = Nothing
+        parseName _           = empty
 
-        auxParseName ('>':s) = Just ("", s)
+        auxParseName ('>':s) = return ("", s)
         auxParseName (c:s)   = case auxParseName s of
-            Just (name, s') -> Just (c:name, s')
-            Nothing         -> Nothing
-        auxParseName []      = Nothing
-group _ _ = Nothing
+            Just (name, s') -> return (c:name, s')
+            Nothing         -> empty
+        auxParseName []      = empty
+group _ _ = empty
