@@ -78,7 +78,7 @@ auxparse failhard s  = case parseAtom failhard s of
     Nothing -> if failhard then Nothing else Just (Eps, Cat, s)
 
 parseAtom :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-parseAtom failhard = quantity . asum . ([alphanum, group, special, disjunction failhard] <&>) . flip ($)
+parseAtom failhard = quantity . asum . ([alphanum, group, escaped, disjunction failhard] <&>) . flip ($)
 
 quantity :: Maybe (Regex, Regex -> Regex -> Regex, String) -> Maybe (Regex, Regex -> Regex -> Regex, String)
 quantity (Just (re, f, s)) = case s of
@@ -94,8 +94,8 @@ disjunction failhard ('|':s) = case auxparse failhard s of
     Nothing    -> Nothing
 disjunction _ _ = Nothing
 
-special :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-special ('\\':c:s) = case maybePred of
+escaped :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
+escaped ('\\':c:s) = case maybePred of
     Just pred -> Just (Lit ('\\':[c]) (neg . pred), Cat, s)
     Nothing   -> Nothing
     where
@@ -111,7 +111,7 @@ special ('\\':c:s) = case maybePred of
             _    -> Nothing
         neg | isUpper c = not
             | otherwise = id
-special _ = Nothing
+escaped _ = Nothing
 
 alphanum :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
 alphanum (c:s) | isAlphaNum c = Just (Lit [c] (== c), Cat, s)
