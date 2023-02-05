@@ -82,34 +82,34 @@ simpl (Group lb  re)  = Group lb (simpl re)
 simpl re              = re
 
 parse :: String -> Maybe Regex
-parse s = case auxParse True s of
-    Just (re, glue, _) -> Just . simpl $ Eps `glue` re
+parse s = case auxParse True grpEnvEmpty s of
+    Just (re, glue, _, _) -> Just . simpl $ Eps `glue` re
     Nothing -> Nothing
 
-auxParse :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-auxParse failhard [] = Just (Eps, Cat, [])
-auxParse failhard s  = case parseAtom failhard s of
-    Just (re, glue, s') -> do
-        (re', glue', s'') <- auxParse failhard s'
-        return (re `glue'` re', glue, s'')
-    Nothing -> if failhard then Nothing else Just (Eps, Cat, s)
+auxParse :: Bool -> GroupEnv -> String -> Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv)
+auxParse failhard env "" = Just (Eps, Cat, [], env)
+auxParse failhard env s  = case parseAtom failhard env s of
+    Just (re, glue, s', env') -> do
+        (re', glue', s'', env'') <- auxParse failhard env' s'
+        return (re `glue'` re', glue, s'', env'')
+    Nothing -> if failhard then Nothing else Just (Eps, Cat, s, env)
 
-parseAtom :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-parseAtom failhard = quantity . asum . ([group, plainOrEscd, disjunction failhard] <&>) . flip ($)
+parseAtom :: Bool -> GroupEnv -> String -> Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv)
+parseAtom failhard env = quantity . asum . ([group, plainOrEscd, disjunction failhard] <&> ($ env) <&>) . flip ($)
 
-quantity :: Maybe (Regex, Regex -> Regex -> Regex, String) -> Maybe (Regex, Regex -> Regex -> Regex, String)
-quantity (Just (re, f, s)) = case s of
-    '*':s' -> Just (Star re, f, s')
-    '+':s' -> Just (Cat re (Star re), f, s')
-    '?':s' -> Just (Or Eps re, f, s')
-    s'     -> Just (re, f, s')
+quantity :: Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv) -> Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv)
+quantity (Just (re, glue, s, env)) = case s of
+    '*':s' -> Just (Star re,           glue, s', env)
+    '+':s' -> Just (Cat  re (Star re), glue, s', env)
+    '?':s' -> Just (Or   Eps re,       glue, s', env)
+    s'     -> Just (re,                glue, s', env)
 quantity Nothing = Nothing
 
-disjunction :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-disjunction failhard ('|':s) = case auxParse failhard s of 
-    Just (re, glue, s') -> Just (Eps `glue` re, Or, s')
+disjunction :: Bool -> GroupEnv -> String -> Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv)
+disjunction failhard env ('|':s) = case auxParse failhard env s of 
+    Just (re, glue, s', env') -> Just (Eps `glue` re, Or, s', env')
     Nothing    -> Nothing
-disjunction _ _ = Nothing
+disjunction _ _ _ = Nothing
 
 predFromChar :: Bool -> Char -> Maybe (Char -> Bool)
 predFromChar escaped c = do
@@ -131,46 +131,27 @@ predFromChar escaped c = do
             ]
         nescd = [('.', const True)]
 
-plainOrEscd :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-plainOrEscd ('\\':c:s) = case predFromChar True c of
-    Just pred -> Just (Lit ('\\':[c]) pred, Cat, s)
-    Nothing   -> Nothing
-plainOrEscd (c:s) = case predFromChar False c of
-    Just pred -> Just (Lit [c] pred, Cat, s)
-    Nothing   -> Nothing
-plainOrEscd _  = Nothing
+plainOrEscd :: GroupEnv -> String -> Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv)
+plainOrEscd env ('\\':c:s) = case predFromChar True c of
+    Just pred  -> Just (Lit ('\\':[c]) pred, Cat, s, env)
+    Nothing    -> Nothing
+plainOrEscd env (c:s) = case predFromChar False c of
+    Just pred  -> Just (Lit [c] pred, Cat, s, env)
+    Nothing    -> Nothing
+plainOrEscd _ _ = Nothing
 
-group :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-group ('(':s) = case auxParse False s' of
-    Just (re, glue, ')':s'') -> Just (Eps `glue` Group name re, Cat, s'')
-    _ -> Nothing
-    where
-        (name, s') = case parseName s of
-            Just (name', s'') -> (name', s'')
-            Nothing           -> ("",    s)
-
-        parseName ('<':s) = auxParseName s
-        parseName _       = Nothing
-
-        auxParseName ('>':s) = Just ("", s)
-        auxParseName (c:s)   = case auxParseName s of
-            Just (name, s') -> Just (c:name, s')
-            Nothing         -> Nothing
-        auxParseName []      = Nothing
-group _ = Nothing
-
-group2 :: GroupEnv -> String -> Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv)
-group2 env ('(':s) = case name of
-    "" -> case auxParse False s' of
+group :: GroupEnv -> String -> Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv)
+group env ('(':s) = case name of
+    "" -> case auxParse False env s' of
         Just (re, glue, ')':s'', env') -> Just (Eps `glue` Group "" re, Cat, s'', env')
         _ -> Nothing
     _  -> case s' of
         (')':s'') -> do
-            gr <- grpEnvGet name env
+            gr <- grpEnvGet env name
             Just (gr, Cat, s'', env)
-        _ -> case auxParse False s' of
-            Just (re, glue, ')':s'', env') -> case grpEnvGet name env' of
-                Nothing -> let gr = Group name re in Just (Eps `glue` gr, Cat, s'', grpEnvAdd name gr env')
+        _ -> case auxParse False env s' of
+            Just (re, glue, ')':s'', env') -> case grpEnvGet env' name of
+                Nothing -> let gr = Group name re in Just (Eps `glue` gr, Cat, s'', fromJust $ grpEnvAdd env' name gr)
                 Just _  -> Nothing
             _ -> Nothing
     where
@@ -186,4 +167,4 @@ group2 env ('(':s) = case name of
             Just (name, s') -> Just (c:name, s')
             Nothing         -> Nothing
         auxParseName []      = Nothing
-group2 _ _ = Nothing
+group _ _ = Nothing
