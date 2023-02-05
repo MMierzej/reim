@@ -82,15 +82,15 @@ simpl (Group lb  re)  = Group lb (simpl re)
 simpl re              = re
 
 parse :: String -> Maybe Regex
-parse s = case auxparse True s of
+parse s = case auxParse True s of
     Just (re, glue, _) -> Just . simpl $ Eps `glue` re
     Nothing -> Nothing
 
-auxparse :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-auxparse failhard [] = Just (Eps, Cat, [])
-auxparse failhard s  = case parseAtom failhard s of
+auxParse :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
+auxParse failhard [] = Just (Eps, Cat, [])
+auxParse failhard s  = case parseAtom failhard s of
     Just (re, glue, s') -> do
-        (re', glue', s'') <- auxparse failhard s'
+        (re', glue', s'') <- auxParse failhard s'
         return (re `glue'` re', glue, s'')
     Nothing -> if failhard then Nothing else Just (Eps, Cat, s)
 
@@ -106,7 +106,7 @@ quantity (Just (re, f, s)) = case s of
 quantity Nothing = Nothing
 
 disjunction :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-disjunction failhard ('|':s) = case auxparse failhard s of 
+disjunction failhard ('|':s) = case auxParse failhard s of 
     Just (re, glue, s') -> Just (Eps `glue` re, Or, s')
     Nothing    -> Nothing
 disjunction _ _ = Nothing
@@ -141,7 +141,7 @@ plainOrEscd (c:s) = case predFromChar False c of
 plainOrEscd _  = Nothing
 
 group :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
-group ('(':s) = case auxparse False s' of
+group ('(':s) = case auxParse False s' of
     Just (re, glue, ')':s'') -> Just (Eps `glue` Group name re, Cat, s'')
     _ -> Nothing
     where
@@ -161,14 +161,14 @@ group _ = Nothing
 
 group2 :: GroupEnv -> String -> Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv)
 group2 env ('(':s) = case name of
-    "" -> case auxparse False s' of
+    "" -> case auxParse False s' of
         Just (re, glue, ')':s'', env') -> Just (Eps `glue` Group "" re, Cat, s'', env')
         _ -> Nothing
     _  -> case s' of
         (')':s'') -> do
             gr <- grpEnvGet name env
             Just (gr, Cat, s'', env)
-        _ -> case auxparse False s' of
+        _ -> case auxParse False s' of
             Just (re, glue, ')':s'', env') -> case grpEnvGet name env' of
                 Nothing -> let gr = Group name re in Just (Eps `glue` gr, Cat, s'', grpEnvAdd name gr env')
                 Just _  -> Nothing
