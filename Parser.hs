@@ -3,9 +3,11 @@ import Data.Char
 import Data.Foldable
 import Data.Functor
 import Data.Maybe
-import Data.Tuple
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Set (Set)
+import qualified Data.Set as Set
+import Data.Tuple
 
 
 data Regex
@@ -26,8 +28,8 @@ instance Eq Regex where
     _           == _           = False
 
 instance Show Regex where
-    -- show = showStruct
-    show = stringify
+    show = showStruct
+    -- show = stringify
         where
             showStruct Eps           = "Eps"
             showStruct (Lit   s  _)  = "Lit \"" ++ s ++ "\" <pred>"
@@ -48,6 +50,15 @@ instance Show Regex where
             stringify (Star re)     = show re ++ "*"
             stringify (Group [] re) = "("               ++ show re ++ ")"
             stringify (Group lb re) = "(<" ++ lb ++ ">" ++ show re ++ ")"
+
+simpl :: Regex -> Regex
+simpl (Or    re  rf)  = Or   (simpl re) (simpl rf)
+simpl (Cat   Eps re)  = simpl re
+simpl (Cat   re  Eps) = simpl re
+simpl (Cat   re  rf)  = Cat  (simpl re) (simpl rf)
+simpl (Star  re)      = Star (simpl re)
+simpl (Group lb  re)  = Group lb (simpl re)
+simpl re              = re
 
 
 type GroupEnv = Map String Regex
@@ -72,14 +83,12 @@ grpEnvEmpty = Map.empty
 main = print $ parse "a*|\\((<NAMEK>|b(x|d|p\\w)c\\d)?d+()|e*"
 -- main = print $ parse "a*(b(x)c)?d+()"
 
-simpl :: Regex -> Regex
-simpl (Or    re  rf)  = Or   (simpl re) (simpl rf)
-simpl (Cat   Eps re)  = simpl re
-simpl (Cat   re  Eps) = simpl re
-simpl (Cat   re  rf)  = Cat  (simpl re) (simpl rf)
-simpl (Star  re)      = Star (simpl re)
-simpl (Group lb  re)  = Group lb (simpl re)
-simpl re              = re
+
+specials :: [Char]
+specials =  ['(', ')', '[', ']', '{', '}', '|', '*', '+', '?', '\\', '.']
+
+setOfSpecials :: Set Char
+setOfSpecials =  Set.fromList specials
 
 parse :: String -> Maybe Regex
 parse s = case auxParse True grpEnvEmpty s of
@@ -114,22 +123,17 @@ disjunction _ _ _ = Nothing
 predFromChar :: Bool -> Char -> Maybe (Char -> Bool)
 predFromChar escaped c = do
         c2p <- Map.lookup escaped table
-        Map.lookup c c2p <|> (if not escaped then Just (== c) else Nothing)
+        Map.lookup c c2p <|> if not escaped && Set.notMember c setOfSpecials
+                                then Just (== c)
+                             else Nothing
     where
-        table = Map.fromList . zip [True, False] $ [yescd, nescd] <&> Map.fromList
-        yescd = ([
-                ('w', isLetter),
-                ('d', isDigit),
-                ('s', isSpace)
-            ] >>= \(c, p) -> [
-                (c, p), (toUpper c, not . p)
-            ]) ++ [
-                ('n', (== '\n')),
-                ('t', (== '\t'))
-            ] ++ [
-                (c, (== c)) | c <- [ '(', ')', '[', ']', '{', '}', '|', '*', '+', '?', '\\', '.' ]
-            ]
-        nescd = [('.', const True)]
+        table = Map.fromList . zip [True, False] $ [yesc'd, nesc'd] <&> Map.fromList
+        yesc'd = ([('w', isLetter),
+                   ('d', isDigit),
+                   ('s', isSpace)] >>= \(c, p) -> [(c, p), (toUpper c, not . p)])
+                ++ [('n', (== '\n')), ('t', (== '\t'))]
+                ++ [(c, (== c)) | c <- specials]
+        nesc'd = [('.', const True)]
 
 plainOrEscd :: GroupEnv -> String -> Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv)
 plainOrEscd env ('\\':c:s) = case predFromChar True c of
