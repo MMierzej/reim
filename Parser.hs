@@ -4,6 +4,7 @@ import Data.Foldable
 import Data.Functor
 import Data.Maybe
 import Data.Tuple
+import qualified Data.Map as Map
 
 
 data Regex
@@ -95,6 +96,26 @@ disjunction failhard ('|':s) = case auxparse failhard s of
     Just (re, glue, s') -> Just (Eps `glue` re, Or, s')
     Nothing    -> Nothing
 disjunction _ _ = Nothing
+
+predFromChar :: Bool -> Char -> Maybe (Char -> Bool)
+predFromChar escaped c = do
+        c2p  <- Map.lookup escaped table
+        Map.lookup c c2p <|> (if not escaped then Just (== c) else Nothing)
+    where
+        table = Map.fromList . zip [True, False] $ [yescd, nescd] <&> Map.fromList
+        yescd = ([
+                ('w', isLetter),
+                ('d', isDigit),
+                ('s', isSpace)
+            ] >>= \(c, p) -> [
+                (c, p), (toUpper c, not . p)
+            ]) ++ [
+                ('n', (== '\n')),
+                ('t', (== '\t'))
+            ] ++ [
+                (c, (== c)) | c <- [ '(', ')', '[', ']', '{', '}', '|', '*', '+', '?', '\\', '.' ]
+            ]
+        nescd = [('.', const True)]
 
 escaped :: String -> Maybe (Regex, Regex -> Regex -> Regex, String)
 escaped ('\\':c:s) = case maybePred of
