@@ -74,7 +74,9 @@ parse s = case auxparse True s of
 auxparse :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
 auxparse failhard [] = Just (Eps, Cat, [])
 auxparse failhard s  = case parseAtom failhard s of
-    Just (re, glue, s') -> (\(re', glue', s'') -> (re `glue'` re', glue, s'')) <$> auxparse failhard s'
+    Just (re, glue, s') -> do
+        (re', glue', s'') <- auxparse failhard s'
+        return (re `glue'` re', glue, s'')
     Nothing -> if failhard then Nothing else Just (Eps, Cat, s)
 
 parseAtom :: Bool -> String -> Maybe (Regex, Regex -> Regex -> Regex, String)
