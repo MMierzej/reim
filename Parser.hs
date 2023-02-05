@@ -4,6 +4,7 @@ import Data.Foldable
 import Data.Functor
 import Data.Maybe
 import Data.Tuple
+import Data.Map (Map)
 import qualified Data.Map as Map
 
 
@@ -49,13 +50,23 @@ instance Show Regex where
             stringify (Group lb re) = "(<" ++ lb ++ ">" ++ show re ++ ")"
 
 
+type GroupEnv = Map String Regex
+
+grpAdd :: GroupEnv -> String -> Regex -> Maybe GroupEnv
+grpAdd env name g@(Group {}) = Just (Map.insert name g env)
+grpAdd _ _ _ = Nothing
+
+grpGet :: GroupEnv -> String -> Maybe Regex
+grpGet = flip Map.lookup
+
+
 -- main = print $ parse "abcdefghi"
 -- main = print $ parse "a|b"
 -- main = print $ parse "x|"
 -- main = print $ parse "|d"
 -- main = print $ parse "x|d"
 -- main = print $ parse "a*|(|b(x|d|p\\w)c\\d)?d+()|e*"
-main = print $ parse "a*|(<NAMEK>|b(x|d|p\\w)c\\d)?d+()|e*"
+main = print $ parse "a*|\\((<NAMEK>|b(x|d|p\\w)c\\d)?d+()|e*"
 -- main = print $ parse "a*(b(x)c)?d+()"
 
 simpl :: Regex -> Regex
@@ -144,3 +155,32 @@ group ('(':s) = case auxparse False s' of
             Nothing         -> Nothing
         auxParseName []      = Nothing
 group _ = Nothing
+
+group2 :: GroupEnv -> String -> Maybe (Regex, Regex -> Regex -> Regex, String, GroupEnv)
+group2 env ('(':s) = case name of
+    "" -> case auxparse False s' of
+        Just (re, glue, ')':s'', env') -> Just (Eps `glue` Group "" re, Cat, s'', env')
+        _ -> Nothing
+    _  -> case s' of
+        (')':s'') -> do
+            gr <- grpGet name env
+            Just (gr, Cat, s'', env)
+        _ -> case auxparse False s' of
+            Just (re, glue, ')':s'', env') -> case grpGet name env' of
+                Nothing -> let gr = Group name re in Just (Eps `glue` gr, Cat, s'', grpAdd name gr env')
+                Just _  -> Nothing
+            _ -> Nothing
+    where
+        (name, s') = case parseName s of
+            Just (name', s'') -> (name', s'')
+            Nothing           -> ("",    s)
+
+        parseName ('<':s)     = auxParseName s
+        parseName _           = Nothing
+
+        auxParseName ('>':s) = Just ("", s)
+        auxParseName (c:s)   = case auxParseName s of
+            Just (name, s') -> Just (c:name, s')
+            Nothing         -> Nothing
+        auxParseName []      = Nothing
+group2 _ _ = Nothing
