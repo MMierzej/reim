@@ -52,12 +52,15 @@ instance Show Regex where
 
 type GroupEnv = Map String Regex
 
-grpAdd :: GroupEnv -> String -> Regex -> Maybe GroupEnv
-grpAdd env name g@(Group {}) = Just (Map.insert name g env)
-grpAdd _ _ _ = Nothing
+grpEnvAdd :: GroupEnv -> String -> Regex -> Maybe GroupEnv
+grpEnvAdd env name g@(Group {}) = Just (Map.insert name g env)
+grpEnvAdd _ _ _ = Nothing
 
-grpGet :: GroupEnv -> String -> Maybe Regex
-grpGet = flip Map.lookup
+grpEnvGet :: GroupEnv -> String -> Maybe Regex
+grpEnvGet = flip Map.lookup
+
+grpEnvEmpty :: GroupEnv
+grpEnvEmpty = Map.empty
 
 
 -- main = print $ parse "abcdefghi"
@@ -163,11 +166,11 @@ group2 env ('(':s) = case name of
         _ -> Nothing
     _  -> case s' of
         (')':s'') -> do
-            gr <- grpGet name env
+            gr <- grpEnvGet name env
             Just (gr, Cat, s'', env)
         _ -> case auxparse False s' of
-            Just (re, glue, ')':s'', env') -> case grpGet name env' of
-                Nothing -> let gr = Group name re in Just (Eps `glue` gr, Cat, s'', grpAdd name gr env')
+            Just (re, glue, ')':s'', env') -> case grpEnvGet name env' of
+                Nothing -> let gr = Group name re in Just (Eps `glue` gr, Cat, s'', grpEnvAdd name gr env')
                 Just _  -> Nothing
             _ -> Nothing
     where
