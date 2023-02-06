@@ -1,3 +1,5 @@
+{-# LANGUAGE GADTs #-}
+
 import Control.Applicative
 import Data.Char
 import Data.Foldable
@@ -64,8 +66,8 @@ simpl re              = re
 type GroupEnv = Map String Regex
 
 grpEnvAdd :: GroupEnv -> String -> Regex -> Maybe GroupEnv
-grpEnvAdd env name g@(Group {}) = Just (Map.insert name g env)
-grpEnvAdd _ _ _ = Nothing
+grpEnvAdd env name g@(Group {}) = return (Map.insert name g env)
+grpEnvAdd _ _ _ = empty
 
 grpEnvGet :: GroupEnv -> String -> Maybe Regex
 grpEnvGet = flip Map.lookup
@@ -74,14 +76,27 @@ grpEnvEmpty :: GroupEnv
 grpEnvEmpty = Map.empty
 
 
-data Ctx = Root | L Ctx
+data Path where
+    Root :: Path
+    L    :: Regex -> Path -> Path
+    R    :: Regex -> Path -> Path
 
-restore :: Regex -> Ctx -> Regex -> Regex
-restore _ Root re = re
-restore (Or  l r) (L path) re = Or  (restore l path re) r
-restore (Cat l r) (L path) re = Cat (restore l path re) r
-restore _ _ _ = Eps -- shouldn't take place
+instance Semigroup Path where
+    Root        <> tail = tail
+    (L re path) <> tail = L re (path <> tail)
+    (R re path) <> tail = R re (path <> tail)
 
+
+type Ctx = (Regex, Path)
+
+restoRe :: Ctx -> Regex
+restoRe (re, Root) = re
+restoRe (re, (L parent path')) = case parent of
+    (Or  _ r) -> restoRe (Or  re r, path')
+    (Cat _ r) -> restoRe (Cat re r, path')
+restoRe (re, (R parent path')) = case parent of
+    (Or  l _) -> restoRe (Or  l re, path')
+    (Cat l _) -> restoRe (Cat l re, path')
 
 -- main = print $ parse "abcdefghi"
 -- main = print $ parse "a|b"
@@ -94,7 +109,7 @@ main = print $ parse "a*|\\((<NAMEK>|b(<G>x|d|p\\w)c\\d)?d+(<NAMEK>)(<G>)?|e*"
 -- main = print $ parse "aa|bbb|cc|dd"
 
 
-type IntermResult = (Regex, String, GroupEnv, Regex, Ctx)
+type IntermResult = (Ctx, String, GroupEnv)
 
 specials :: [Char]
 specials =  ['(', ')', '[', ']', '{', '}', '|', '*', '+', '?', '\\', '.']
@@ -104,27 +119,25 @@ setOfSpecials =  Set.fromList specials
 
 parse :: String -> Maybe Regex
 parse s = case auxParse True grpEnvEmpty s of
-    Just (re, _, _, root, ctx) -> return . simpl $ restore root ctx re
-    Nothing -> empty
+    Just (ctx, _, _) -> return . simpl . restoRe $ ctx
+    Nothing          -> empty
 
 auxParse :: Bool -> GroupEnv -> String -> Maybe IntermResult
-auxParse failhard env "" = Just (Eps, "", env, Eps, Root)
+auxParse failhard env "" = return ((Eps, Root), "", env)
 auxParse failhard env s  = case parseAtom failhard env s of
-    Just (re, s', env', _, Root) -> do
-        (re', s'', env'', root', ctx') <- auxParse failhard env' s'
-        return (Cat re re', s'', env'', root', ctx')
-    Just (re, s', env', root, ctx@(L _)) -> do
-        (re', s'', env'', root', ctx') <- auxParse failhard env' s'
-        let re''   = restore root' ctx' re'
-        let root'' = Cat root re''
-        return (re, s'', env'', root'', L ctx)
-    Nothing -> if failhard then empty else return (Eps, s, env, Eps, Root)
+    Just ((re, Root), s', env') -> do
+        ((re', path), s'', env'') <- auxParse failhard env' s'
+        return ((Cat re re', path), s'', env'')
+    Just ((re, path), s', env') -> do
+        ((re', path'), s'', env'') <- auxParse failhard env' s'
+        return ((re, path <> L (Cat Eps re') path'), s'', env'')
+    Nothing -> if failhard then empty else return ((Eps, Root), s, env)
 
 parseAtom :: Bool -> GroupEnv -> String -> Maybe IntermResult
 parseAtom failhard env = quantity . asum . ([plainOrEscd, group, disjunction failhard] <&> ($ env) <&>) . flip ($)
 
 quantity :: Maybe IntermResult -> Maybe IntermResult
-quantity (Just (re, s, env, root, ctx)) = return (re', s', env, root, ctx)
+quantity (Just ((re, path), s, env)) = return ((re', path), s', env)
     where
         (re', s') = case s of
             '*':s' -> (Star re,           s')
@@ -135,28 +148,27 @@ quantity Nothing = empty
 
 disjunction :: Bool -> GroupEnv -> String -> Maybe IntermResult
 disjunction failhard env ('|':s) = do
-    (re, s', env', root, ctx) <- auxParse failhard env s
-    return (Eps, s', env', Or Eps (restore root ctx re), L Root)
+    (ctx, s', env') <- auxParse failhard env s
+    return ((Eps, L (Or Eps (restoRe ctx)) Root), s', env')
 disjunction _ _ _ = empty
 
 plainOrEscd :: GroupEnv -> String -> Maybe IntermResult
 plainOrEscd env ('\\':c:s) = do
     pred <- predFromChar True c
-    let re = Lit ('\\':[c]) pred
-    return (re, s, env, re, Root)
+    return ((Lit ('\\':[c]) pred, Root), s, env)
 plainOrEscd env (c:s) = do
     pred <- predFromChar False c
-    let re = Lit [c] pred
-    return (re, s, env, re, Root)
+    return ((Lit [c]        pred, Root), s, env)
 plainOrEscd _ _ = empty
 
 predFromChar :: Bool -> Char -> Maybe (Char -> Bool)
 predFromChar escaped c = do
         c2p <- Map.lookup escaped table
-        Map.lookup c c2p <|> if not escaped && Set.notMember c setOfSpecials
+        Map.lookup c c2p <|> if (not escaped) && isNotSpecial
                                 then return (== c)
                              else empty
     where
+        isNotSpecial = Set.notMember c setOfSpecials
         table = Map.fromList . zip [True, False] $ [yesc'd, nesc'd] <&> Map.fromList
         yesc'd = ([('w', isLetter),
                    ('d', isDigit),
@@ -168,26 +180,25 @@ predFromChar escaped c = do
 group :: GroupEnv -> String -> Maybe IntermResult
 group env ('(':s) = case name of
     "" -> case auxParse False env s' of
-        Just (re, ')':s'', env', root, ctx) -> let gr = Group "" (restore root ctx re) in
-            return (gr, s'', env', gr, Root)
-        _ -> empty
+        Just (ctx, ')':s'', env') -> return ((Group "" (restoRe ctx), Root), s'', env')
+        _                         -> empty
     _  -> case s' of
         (')':s'') -> do
             gr <- grpEnvGet env name
-            return (gr, s'', env, gr, Root)
-        _ -> case auxParse False env s' of
-            Just (re, ')':s'', env', root, ctx) -> case grpEnvGet env' name of
-                Nothing -> let gr = Group name (restore root ctx re) in
-                    return (gr, s'', fromJust $ grpEnvAdd env' name gr, gr, Root)
+            return ((gr, Root), s'', env)
+        _         -> case auxParse False env s' of
+            Just (ctx, ')':s'', env') -> case grpEnvGet env' name of
+                Nothing -> let gr = Group name (restoRe ctx) in
+                    return ((gr, Root), s'', fromJust $ grpEnvAdd env' name gr)
                 Just _  -> empty
-            _ -> empty
+            _                         -> empty
     where
         (name, s') = case parseName s of
             Just (name', s'') -> (name', s'')
             Nothing           -> ("",    s)
 
-        parseName ('<':s)     = auxParseName s
-        parseName _           = empty
+        parseName ('<':s) = auxParseName s
+        parseName _       = empty
 
         auxParseName ('>':s) = return ("", s)
         auxParseName (c:s)   = case auxParseName s of
