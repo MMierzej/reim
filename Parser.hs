@@ -1,4 +1,7 @@
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE TemplateHaskell, QuasiQuotes #-}
+
+-- module Parser where
+
 
 import Control.Applicative
 import Data.Char
@@ -10,6 +13,9 @@ import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Tuple
+import Language.Haskell.TH
+import Language.Haskell.TH.Syntax
+import Language.Haskell.TH.Quote
 
 
 data Regex
@@ -76,10 +82,10 @@ grpEnvEmpty :: GroupEnv
 grpEnvEmpty = Map.empty
 
 
-data Path where
-    Root :: Path
-    L    :: Regex -> Path -> Path
-    R    :: Regex -> Path -> Path
+data Path
+    = Root
+    | L    Regex Path
+    | R    Regex Path
 
 instance Semigroup Path where
     Root        <> tail = tail
@@ -104,7 +110,7 @@ restoRe (re, (R parent path')) = case parent of
 -- main = print $ parse "|d"
 -- main = print $ parse "x|d"
 -- main = print $ parse "a*|(|b(x|d|p\\w)c\\d)?d+()|e*"
-main = print $ parse "a*|\\((<NAMEK>|b(<G>x|d|p\\w)c\\d)?d+(<NAMEK>)(<G>)?|e*"
+main = print $ parse "a*|\\((<NAMEK>|b(<G>x|d(<XD>DDD)d|p\\w)c\\d(<XD>))?d+((<XD>)(<G>))*(<NAMEK>)(<G>)?|e*"
 -- main = print $ parse "a*(b(x)c)?d+()"
 -- main = print $ parse "aa|bbb|cc|dd"
 
@@ -206,3 +212,25 @@ group env ('(':s) = case name of
             Nothing         -> empty
         auxParseName []      = empty
 group _ _ = empty
+
+
+re :: QuasiQuoter
+re =  QuasiQuoter
+    { quoteExp  = parseRegex
+    , quotePat  = undefined
+    , quoteType = undefined
+    , quoteDec  = undefined
+    }
+    where
+        parseRegex s = case parse s of
+            Nothing -> fail $ "Unable to parse the given regex string: " ++ s
+            Just re -> interp re
+        interp Eps             = [| Eps |]
+        interp (Lit   lit  p)  = [| Lit   $(stringE lit)  $(mkPred lit) |]
+        interp (Or    l    r)  = [| Or    $(interp l)     $(interp r)   |]
+        interp (Cat   l    r)  = [| Cat   $(interp l)     $(interp r)   |]
+        interp (Star  re)      = [| Star  $(interp re)                  |]
+        interp (Group name gr) = [| Group $(stringE name) $(interp gr)  |]
+
+        mkPred ('\\':c:s) = [| \x -> (fromJust . predFromChar True  $ c) x |]
+        mkPred (c:s)      = [| \x -> (fromJust . predFromChar False $ c) x |]
